@@ -162,6 +162,8 @@ if "generated_mp3_title" not in st.session_state:
     st.session_state.generated_mp3_title = ""
 if "creative_mode" not in st.session_state:
     st.session_state.creative_mode = False
+if "tts_voice" not in st.session_state:  # ADDED: Initialize tts_voice in session state
+    st.session_state.tts_voice = "en-IN-NeerjaNeural"
 
 def get_checkpoint_file():
     return f"story_checkpoint_{st.session_state.story_id}.json"
@@ -462,10 +464,10 @@ def generate_complete_story(premise, num_chapters, creative_mode=False):
         else:
             st.warning(f"⚠️ Chapter {chapter_num} email failed: {msg}")
         
-        # Start MP3 generation for this chapter in background
+        # Start MP3 generation for this chapter in background - FIXED: using st.session_state.tts_voice
         thread = threading.Thread(
             target=send_mp3_email_background,
-            args=(chapter, full_title, chapter_num, st.session_state.timestamp, tts_voice),
+            args=(chapter, full_title, chapter_num, st.session_state.timestamp, st.session_state.tts_voice),
             daemon=True
         )
         thread.start()
@@ -663,9 +665,10 @@ with st.sidebar:
         options=list(EDGE_FEMALE_VOICES.keys()),
         format_func=lambda x: EDGE_FEMALE_VOICES[x],
         index=0,
-        help="Choose the voice for MP3 audiobook generation"
+        help="Choose the voice for MP3 audiobook generation",
+        key="voice_selector"
     )
-    tts_voice = selected_voice_name
+    st.session_state.tts_voice = selected_voice_name  # FIXED: Store in session state
     st.caption(f"Current voice: {EDGE_FEMALE_VOICES[selected_voice_name]}")
     st.markdown("---")
     
