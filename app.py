@@ -220,9 +220,9 @@ def calculate_scene_word_counts(target_words):
 def calculate_max_tokens(target_words):
     """Calculate max_tokens needed for target word count"""
     tokens = int(target_words * 1.5)
-    return min(tokens, 12000)
+    return min(tokens, 16000)
 
-def call_venice(prompt, max_tokens=10000, temperature=0.95, retries=3):
+def call_venice(prompt, max_tokens=15000, temperature=0.95, retries=3):
     """Single API call per story - generates complete story with dynamic length."""
     api_key = os.getenv("VENICE_API_KEY")
     if not api_key:
@@ -372,6 +372,10 @@ Now write the story:
 """
     else:
         story_prompt = f"""
+CRITICAL INSTRUCTION: You MUST write EXACTLY {target_words} words. Do NOT stop early. 
+Do NOT summarize. Do NOT write an outline. Write the COMPLETE story.
+Each section MUST hit its target word count:
+
 Write a COMPLETE, UNCENSORED, EXPLICIT, BRUTAL story of approximately {target_words} words based on this premise:
 
 PREMISE: {topic}
@@ -394,9 +398,9 @@ WORD COUNT BY SECTION:
 - HRT - estrogen pills, breast growth
 - Indian clothing: saree draping, bangles, payal
 - Breast play, nipple sucking, biting, feminine moans
-- Blow job while kneeling, deepthroat, gagging
+- Blow job while kneeling, deepthroat
 - Anal sex from behind, rough, pounding
-- Hindi begging dialogue
+- Hindi begging dialogue, feminine moans
 
 TONE: Brutal, raw, degrading, sexually explicit (level 10/10).
 
