@@ -54,9 +54,8 @@ st.set_page_config(page_title="SG Generator", page_icon="📖", layout="wide")
 
 # Check login FIRST before anything else
 if not check_login():
-    st.stop()  # Stop execution if not logged in
+    st.stop()
 # ------------------- END LOGIN PAGE -------------------
-
 
 # ------------------- Mac sleep prevention (always on) -------------------
 _caffeinate_proc = None
@@ -167,7 +166,7 @@ if "generated_mp3_path" not in st.session_state:
     st.session_state.generated_mp3_path = None
 if "generated_mp3_title" not in st.session_state:
     st.session_state.generated_mp3_title = ""
-if "creative_mode" not in st.session_state:              # <-- ADD THIS
+if "creative_mode" not in st.session_state:
     st.session_state.creative_mode = False
 
 def get_checkpoint_file():
@@ -189,10 +188,10 @@ DEFAULT_ELEMENTS = [
     "Lace panties and bras", "Feeling of lace against skin", "HRT - estrogen pills",
     "Breast development", "Waist training corset", "High heels training",
     "Saree draping", "Salwar kameez", "Lehenga", "Indian jewelry",
-    "Breast play and nipple sucking", "Blow jobs while kneeling", "feminine maons",
-    "Public outings as a woman", "Ear piercing", "Nose piercing",
+    "Breast play and nipple sucking", "Blow jobs while kneeling",
+    "Feminine moans", "Public outings as a woman", "Ear piercing", "Nose piercing",
     "Lipstick - trying different shades", "Eye makeup", "Nail polish", "Bangles", "Anklets",
-    "Role play sex gamee", "Saree opening by force", "Tearing choli", "Tieing hands with dupatta"
+    "Role play sex games", "Saree opening by force", "Tearing choli", "Tieing hands with dupatta"
 ]
 
 # ------------------- Venice.ai API Configuration -------------------
@@ -246,7 +245,7 @@ CRITICAL RULES:
   * "Pls sir, aur chodiye" (Please sir, I want more)
   * "Mujhe maaf kar do" (Forgive me)
   * "Main apki hoon" (I am yours)
-  * "Feminine moans"
+- Include feminine moans: "Mmm...", "Ahh...", "Haa... haa...", "Ohh...", "Aahhh!"
 - Write in SHORT, PUNCHY sentences
 - NO metaphors, NO poetry, NO flowery language
 - Be BRUTALLY HONEST about what happens
@@ -331,7 +330,7 @@ def test_api():
 def get_model_cost_estimate(model_id, word_count=5000):
     """Estimate cost for a story of given word count"""
     tokens = int(word_count * 1.3)
-    price_per_1M = 0.25  # Venice.ai approximate price
+    price_per_1M = 0.25
     cost = (tokens / 1_000_000) * price_per_1M
     return cost
 
@@ -346,7 +345,6 @@ def generate_complete_story(topic, target_words=DEFAULT_WORD_COUNT, creative_mod
     est_minutes = int(target_words / 150)
     st.info(f"🎵 Estimated MP3 duration: ~{est_minutes} minutes")
     
-    # INDENT THIS BLOCK - was at wrong indentation level
     if creative_mode:
         story_prompt = f"""
 Write an explicit adult story of approximately {target_words} words.
@@ -363,10 +361,10 @@ Include these elements:
 - Estrogen pills, breast growth
 - Indian clothing: saree, bangles, anklets
 - Intimate scenes: breast play, oral sex, anal sex
-- Feminine moans
+- Feminine moans: "Mmm...", "Ahh...", "Haa... haa...", "Ohh...", "Aahhh!"
 - Hindi phrases during intimate moments
 
-Write directly, describe physical sensations, include dialogue.
+Write directly, describe physical sensations, include dialogue and feminine moans.
 
 Now write the story:
 """
@@ -397,14 +395,44 @@ WORD COUNT BY SECTION:
 - Lace panties and bras, feeling of lace
 - HRT - estrogen pills, breast growth
 - Indian clothing: saree draping, bangles, payal
-- Breast play, nipple sucking, biting, feminine moans
+- Breast play, nipple sucking, biting
 - Blow job while kneeling, deepthroat
 - Anal sex from behind, rough, pounding
-- Hindi begging dialogue, feminine moans
+- Hindi begging dialogue
+- FEMININE MOANS throughout sex scenes: "Mmm...", "Ahh...", "Haa... haa...", "Ohh...", "Aahhh!"
+
+**SEXY FEMININE VOCALS (CRITICAL for audiobook experience):**
+
+Throughout every intimate scene, include her vocal reactions written as dialogue:
+
+Soft/Start of intimacy:
+- "Mmm..." (soft, breathy moan)
+- "Haa..." (gentle sigh)
+- "Ahh..." (pleasure beginning)
+
+During active sex:
+- "Ahh... ahh... mmm..." (rhythmic moans)
+- "Haa... haa... harder..." (panting + words)
+- "Mmm... yes... right there..." (moaning words)
+
+Climbing to orgasm:
+- "Ohh... ohh... I'm close..."
+- "Haa... haa... don't stop..."
+- "Mmm... please... please..."
+
+Orgasm:
+- "Aahhhhh! Aahhhhhhh!" (loud, prolonged cry)
+- "Ohhh! Ohhh! Mmm..."
+
+Afterglow:
+- "Haa... mmm..." (satisfied sighs)
+- "Ahh... that was... mmm..."
+
+Example: "Mmm..." she moaned softly as his lips found her nipple. "Ahh... harder..." she breathed. "Haa... haa... I'm coming... aahhhhh!"
 
 TONE: Brutal, raw, degrading, sexually explicit (level 10/10).
 
-Now write the COMPLETE, EXPLICIT, UNCENSORED, BRUTAL story:
+Now write the COMPLETE, EXPLICIT, UNCENSORED, BRUTAL story with ALL elements above:
 """
     
     story, err = generate_with_progress(story_prompt, max_tokens=max_tokens, step_description=f"Writing your {target_words}-word story")
@@ -424,6 +452,7 @@ Now write the COMPLETE, EXPLICIT, UNCENSORED, BRUTAL story:
         story = f"TITLE: {first_line}\n\n{story}"
     
     return story, stats
+
 # ------------------- MP3 Generation -------------------
 def generate_mp3_sync(text, story_title, timestamp, voice="en-IN-NeerjaNeural"):
     """Generate MP3 synchronously."""
