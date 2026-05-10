@@ -746,7 +746,7 @@ else:
     single_premise = st.text_area(
         "Enter a story premise here",
         height=60,
-        placeholder="Example: A 28-year-old man named Rajesh has been hiding his gynecomastia. His best friend Vikram discovers his secret and encourages his transformation..."
+        placeholder="Story premise here.."
     )
 
 # Show estimated cost for single story
