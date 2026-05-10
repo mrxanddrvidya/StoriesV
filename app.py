@@ -22,8 +22,41 @@ from datetime import datetime
 import edge_tts
 import backoff
 
+# ------------------- LOGIN PAGE -------------------
+def check_login():
+    """Verify user is logged in."""
+    if st.session_state.get("authenticated", False):
+        return True
+    
+    # Show login form
+    st.title("🔐 Login Required")
+    st.markdown("Please enter your credentials to access the SG Story Generator.")
+    
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Login")
+        
+        if submitted:
+            # Get password from Streamlit secrets
+            correct_password = st.secrets.get("ADMIN_PASSWORD", None)
+            
+            if username == "admin" and correct_password and password == correct_password:
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("Invalid username or password")
+    
+    return False
+
 # ------------------- Page config -------------------
-st.set_page_config(page_title="SG Story Generator", page_icon="📖", layout="wide")
+st.set_page_config(page_title="SG Generator", page_icon="📖", layout="wide")
+
+# Check login FIRST before anything else
+if not check_login():
+    st.stop()  # Stop execution if not logged in
+# ------------------- END LOGIN PAGE -------------------
+
 
 # ------------------- Mac sleep prevention (always on) -------------------
 _caffeinate_proc = None
