@@ -189,7 +189,7 @@ DEFAULT_ELEMENTS = [
     "Lace panties and bras", "Feeling of lace against skin", "HRT - estrogen pills",
     "Breast development", "Waist training corset", "High heels training",
     "Saree draping", "Salwar kameez", "Lehenga", "Indian jewelry",
-    "Breast play and nipple sucking", "Blow jobs while kneeling",
+    "Breast play and nipple sucking", "Blow jobs while kneeling", "feminine maons",
     "Public outings as a woman", "Ear piercing", "Nose piercing",
     "Lipstick - trying different shades", "Eye makeup", "Nail polish", "Bangles", "Anklets",
     "Role play sex gamee", "Saree opening by force", "Tearing choli", "Tieing hands with dupatta"
@@ -236,7 +236,7 @@ CRITICAL RULES:
 - Write EXTREMELY GRAPHIC and EXPLICIT content
 - Use VULGAR language: cock, cunt, fuck, ass, tits, cum, slut, whore, bitch
 - Describe every physical sensation in DETAIL
-- Include DIALOGUE during sex scenes
+- Include DIALOGUE and FEMININE MOANS during sex scenes
 - Include VERBAL DEGRADATION and HUMILIATION
 - Include POWER DYNAMICS (dominant/submissive)
 - Include BEGGING and PLEADING dialogue in HINDI:
@@ -246,6 +246,7 @@ CRITICAL RULES:
   * "Pls sir, aur chodiye" (Please sir, I want more)
   * "Mujhe maaf kar do" (Forgive me)
   * "Main apki hoon" (I am yours)
+  * "Feminine moans"
 - Write in SHORT, PUNCHY sentences
 - NO metaphors, NO poetry, NO flowery language
 - Be BRUTALLY HONEST about what happens
@@ -362,6 +363,7 @@ Include these elements:
 - Estrogen pills, breast growth
 - Indian clothing: saree, bangles, anklets
 - Intimate scenes: breast play, oral sex, anal sex
+- Feminine moans
 - Hindi phrases during intimate moments
 
 Write directly, describe physical sensations, include dialogue.
@@ -391,7 +393,7 @@ WORD COUNT BY SECTION:
 - Lace panties and bras, feeling of lace
 - HRT - estrogen pills, breast growth
 - Indian clothing: saree draping, bangles, payal
-- Breast play, nipple sucking, biting
+- Breast play, nipple sucking, biting, feminine moans
 - Blow job while kneeling, deepthroat, gagging
 - Anal sex from behind, rough, pounding
 - Hindi begging dialogue
