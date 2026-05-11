@@ -162,8 +162,19 @@ if "generated_mp3_title" not in st.session_state:
     st.session_state.generated_mp3_title = ""
 if "creative_mode" not in st.session_state:
     st.session_state.creative_mode = False
-if "tts_voice" not in st.session_state:  # ADDED: Initialize tts_voice in session state
+if "tts_voice" not in st.session_state:
     st.session_state.tts_voice = "en-IN-NeerjaNeural"
+# NEW: Store story title for file naming
+if "current_story_title" not in st.session_state:
+    st.session_state.current_story_title = ""
+
+def sanitize_filename(title):
+    """Convert title to safe filename."""
+    # Remove special characters and replace spaces with underscores
+    safe = re.sub(r'[<>:"/\\|?*]', '', title)
+    safe = safe.replace(' ', '_')
+    # Limit length to 100 characters
+    return safe[:100]
 
 def get_checkpoint_file():
     return f"story_checkpoint_{st.session_state.story_id}.json"
@@ -455,21 +466,34 @@ def generate_complete_story(premise, num_chapters, creative_mode=False):
         chapters.append(chapter)
         chapter_stats.append(stats)
         
-        # Send email for this chapter immediately
+        # Extract title from chapter
         title_match = re.search(r"TITLE:\s*(.+?)(?:\n|$)", chapter, re.IGNORECASE)
         chapter_title = title_match.group(1).strip() if title_match else f"Chapter {chapter_num}"
-        full_title = f"{chapter_title} (Chapter {chapter_num} of {num_chapters})"
         
+        # Use story title for multi-chapter stories (first chapter's title becomes the story title)
+        if chapter_num == 1:
+            st.session_state.current_story_title = chapter_title
+        
+        # Create full title with chapter info
+        if num_chapters > 1:
+            full_title = f"{st.session_state.current_story_title} - Chapter {chapter_num}"
+        else:
+            full_title = st.session_state.current_story_title
+        
+        # Generate safe filename from story title
+        safe_filename = sanitize_filename(st.session_state.current_story_title)
+        
+        # Send email for this chapter immediately
         email_sent, msg = send_story_email(chapter, full_title, chapter_num, mp3_path=None)
         if email_sent:
             st.success(f"📧 Chapter {chapter_num} emailed (TXT)!")
         else:
             st.warning(f"⚠️ Chapter {chapter_num} email failed: {msg}")
         
-        # Start MP3 generation for this chapter in background - FIXED: using st.session_state.tts_voice
+        # Start MP3 generation for this chapter in background
         thread = threading.Thread(
             target=send_mp3_email_background,
-            args=(chapter, full_title, chapter_num, st.session_state.timestamp, st.session_state.tts_voice),
+            args=(chapter, full_title, chapter_num, st.session_state.timestamp, st.session_state.tts_voice, st.session_state.current_story_title),
             daemon=True
         )
         thread.start()
@@ -482,6 +506,7 @@ def generate_complete_story(premise, num_chapters, creative_mode=False):
     full_story_parts = []
     if premise and not creative_mode:
         full_story_parts.append(f"**Original Premise:** {premise}\n")
+    full_story_parts.append(f"**Story Title:** {st.session_state.current_story_title}\n")
     full_story_parts.append(f"**Total Chapters:** {num_chapters} | **Words per chapter:** {words_per_chapter} | **Total words:** {total_words}\n")
     full_story_parts.append("---\n")
     
@@ -492,8 +517,7 @@ def generate_complete_story(premise, num_chapters, creative_mode=False):
     
     # Add title if not present
     if not re.search(r"TITLE:", full_story, re.IGNORECASE):
-        first_line = full_story.split('\n')[0][:50]
-        full_story = f"TITLE: {first_line}\n\n{full_story}"
+        full_story = f"TITLE: {st.session_state.current_story_title}\n\n{full_story}"
     
     # Calculate total stats
     total_word_count = sum([s["word_count"] for s in chapter_stats])
@@ -509,11 +533,12 @@ def generate_complete_story(premise, num_chapters, creative_mode=False):
 
 # ------------------- MP3 Generation -------------------
 def generate_mp3_sync(text, story_title, timestamp, voice="en-IN-NeerjaNeural"):
-    """Generate MP3 synchronously."""
+    """Generate MP3 synchronously using story title for filename."""
     clean_text = clean_text_for_tts(text)
     
     temp_dir = tempfile.gettempdir()
-    safe_title = re.sub(r'[<>:"/\\|?*]', '', story_title.replace(' ', '_'))
+    # Use story title for filename (sanitized)
+    safe_title = sanitize_filename(story_title)
     mp3_path = os.path.join(temp_dir, f"{safe_title}_{timestamp}.mp3")
     
     async def generate_async():
@@ -527,11 +552,12 @@ def generate_mp3_sync(text, story_title, timestamp, voice="en-IN-NeerjaNeural"):
     
     return mp3_path
 
-def send_mp3_email_background(story_content, story_title, index, timestamp, voice):
+def send_mp3_email_background(story_content, story_title, index, timestamp, voice, main_story_title):
     """Background thread for MP3 generation and email."""
     try:
+        # Use main story title for MP3 filename
         clean_story = clean_text_for_tts(story_content)
-        mp3_path = generate_mp3_sync(clean_story, story_title, timestamp, voice)
+        mp3_path = generate_mp3_sync(clean_story, main_story_title, timestamp, voice)
         send_story_email(story_content, story_title, index, mp3_path)
         if os.path.exists(mp3_path):
             os.remove(mp3_path)
@@ -550,7 +576,8 @@ def send_story_email(story_content, story_title, index, mp3_path=None):
     story_clean = story_clean.encode('utf-8', 'ignore').decode('utf-8')
     story_title_clean = story_title.encode('utf-8', 'ignore').decode('utf-8')[:100]
     
-    safe_filename = re.sub(r'[<>:"/\\|?*]', '', story_title_clean).replace(' ', '_')
+    # Use story title for filename (sanitized)
+    safe_filename = sanitize_filename(story_title_clean)
     
     attachments = [
         {"filename": f"{safe_filename}.txt", "content": base64.b64encode(story_clean.encode("utf-8")).decode("utf-8"), "encoding": "base64"}
@@ -630,11 +657,11 @@ if st.button("✨ Generate Story", type="secondary", use_container_width=True):
         try:
             story, stats = generate_complete_story(premise if not st.session_state.creative_mode else "", num_chapters, st.session_state.creative_mode)
             if story:
-                title_match = re.search(r"TITLE:\s*(.+?)(?:\n|$)", story, re.IGNORECASE)
-                story_title = title_match.group(1).strip() if title_match else ("Creative Story" if st.session_state.creative_mode else "Generated Story")
+                # Use the stored story title
+                story_title = st.session_state.current_story_title if st.session_state.current_story_title else ("Creative Story" if st.session_state.creative_mode else "Generated Story")
                 timestamp = st.session_state.timestamp
                 
-                safe_title = re.sub(r'[<>:"/\\|?*]', '', story_title).replace(' ', '_')
+                safe_title = sanitize_filename(story_title)
                 
                 st.success(f"✅ Story complete! {stats['word_count']:,} / {stats['target_words']:,} words ({stats['chapters']} chapters)")
                 st.info(f"📧 Each chapter has been emailed as TXT")
@@ -670,7 +697,7 @@ with st.sidebar:
         help="Choose the voice for MP3 audiobook generation",
         key="voice_selector"
     )
-    st.session_state.tts_voice = selected_voice_name  # FIXED: Store in session state
+    st.session_state.tts_voice = selected_voice_name
     st.caption(f"Current voice: {EDGE_FEMALE_VOICES[selected_voice_name]}")
     st.markdown("---")
     
@@ -707,13 +734,14 @@ if st.session_state.story_content:
     
     col1, col2 = st.columns(2)
     with col1:
-        safe_title = re.sub(r'[<>:"/\\|?*]', '', story_title if 'story_title' in locals() else 'story')
+        safe_title = sanitize_filename(st.session_state.current_story_title if st.session_state.current_story_title else 'story')
         st.download_button("💾 Download Story (TXT)", data=st.session_state.story_content,
                            file_name=f"{safe_title}_{num_chapters}chapters.txt", use_container_width=True)
     with col2:
         if st.button("🆕 Clear", use_container_width=True):
             st.session_state.story_content = ""
             st.session_state.last_gen_stats = None
+            st.session_state.current_story_title = ""
             st.rerun()
 
 # Keep caffeinate running
