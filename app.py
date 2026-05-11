@@ -164,7 +164,7 @@ if "creative_mode" not in st.session_state:
     st.session_state.creative_mode = False
 if "tts_voice" not in st.session_state:
     st.session_state.tts_voice = "en-IN-NeerjaNeural"
-# NEW: Store story title for file naming
+# Store story title for file naming
 if "current_story_title" not in st.session_state:
     st.session_state.current_story_title = ""
 
@@ -474,17 +474,13 @@ def generate_complete_story(premise, num_chapters, creative_mode=False):
         if chapter_num == 1:
             st.session_state.current_story_title = chapter_title
         
-        # Create full title with chapter info
+        # Create email subject title (use story title for all chapters)
+        email_subject_title = st.session_state.current_story_title
         if num_chapters > 1:
-            full_title = f"{st.session_state.current_story_title} - Chapter {chapter_num}"
-        else:
-            full_title = st.session_state.current_story_title
+            email_subject_title = f"{st.session_state.current_story_title} (Chapter {chapter_num} of {num_chapters})"
         
-        # Generate safe filename from story title
-        safe_filename = sanitize_filename(st.session_state.current_story_title)
-        
-        # Send email for this chapter immediately
-        email_sent, msg = send_story_email(chapter, full_title, chapter_num, mp3_path=None)
+        # Send email for this chapter immediately - FIXED: Use email_subject_title
+        email_sent, msg = send_story_email(chapter, email_subject_title, chapter_num, mp3_path=None)
         if email_sent:
             st.success(f"📧 Chapter {chapter_num} emailed (TXT)!")
         else:
@@ -493,7 +489,7 @@ def generate_complete_story(premise, num_chapters, creative_mode=False):
         # Start MP3 generation for this chapter in background
         thread = threading.Thread(
             target=send_mp3_email_background,
-            args=(chapter, full_title, chapter_num, st.session_state.timestamp, st.session_state.tts_voice, st.session_state.current_story_title),
+            args=(chapter, email_subject_title, chapter_num, st.session_state.timestamp, st.session_state.tts_voice, st.session_state.current_story_title),
             daemon=True
         )
         thread.start()
@@ -552,21 +548,22 @@ def generate_mp3_sync(text, story_title, timestamp, voice="en-IN-NeerjaNeural"):
     
     return mp3_path
 
-def send_mp3_email_background(story_content, story_title, index, timestamp, voice, main_story_title):
+def send_mp3_email_background(story_content, email_title, index, timestamp, voice, main_story_title):
     """Background thread for MP3 generation and email."""
     try:
         # Use main story title for MP3 filename
         clean_story = clean_text_for_tts(story_content)
         mp3_path = generate_mp3_sync(clean_story, main_story_title, timestamp, voice)
-        send_story_email(story_content, story_title, index, mp3_path)
+        # Pass the email_title for the email subject
+        send_story_email(story_content, email_title, index, mp3_path)
         if os.path.exists(mp3_path):
             os.remove(mp3_path)
-        st.success(f"🎵 MP3 for {story_title} has been emailed!")
+        st.success(f"🎵 MP3 for {email_title} has been emailed!")
     except Exception as e:
-        st.warning(f"MP3 generation failed for {story_title}: {e}")
+        st.warning(f"MP3 generation failed for {email_title}: {e}")
 
 # ------------------- Email Function -------------------
-def send_story_email(story_content, story_title, index, mp3_path=None):
+def send_story_email(story_content, email_title, index, mp3_path=None):
     """Send story with TXT and optionally MP3 attachments."""
     api_key = os.getenv("RESEND_API_KEY")
     if not api_key:
@@ -574,10 +571,13 @@ def send_story_email(story_content, story_title, index, mp3_path=None):
     
     story_clean = clean_text_for_display(story_content)
     story_clean = story_clean.encode('utf-8', 'ignore').decode('utf-8')
-    story_title_clean = story_title.encode('utf-8', 'ignore').decode('utf-8')[:100]
     
-    # Use story title for filename (sanitized)
-    safe_filename = sanitize_filename(story_title_clean)
+    # Use email_title for the subject and filename
+    email_title_clean = email_title.encode('utf-8', 'ignore').decode('utf-8')[:100]
+    
+    # Use the main story title for filename (remove chapter info for cleaner filenames)
+    filename_title = st.session_state.current_story_title if st.session_state.current_story_title else email_title_clean
+    safe_filename = sanitize_filename(filename_title)
     
     attachments = [
         {"filename": f"{safe_filename}.txt", "content": base64.b64encode(story_clean.encode("utf-8")).decode("utf-8"), "encoding": "base64"}
@@ -595,8 +595,8 @@ def send_story_email(story_content, story_title, index, mp3_path=None):
     payload = {
         "from": "PBAppAS <onboarding@resend.dev>",
         "to": "mrxanddrvidya2023@gmail.com",
-        "subject": f"Story Part {index}: {story_title_clean}{subject_suffix}",
-        "text": f"Your story part #{index} ({story_title_clean}) is attached.{' MP3 audiobook included.' if has_mp3 else ''}",
+        "subject": f"Story Part {index}: {email_title_clean}{subject_suffix}",
+        "text": f"Your story part #{index} ({email_title_clean}) is attached.{' MP3 audiobook included.' if has_mp3 else ''}",
         "attachments": attachments
     }
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
