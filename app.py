@@ -224,13 +224,14 @@ CRITICAL RULES:
 - Include DIALOGUE and FEMININE MOANS during sex scenes
 - Include VERBAL DEGRADATION and HUMILIATION
 - Include POWER DYNAMICS (dominant/submissive)
+- Include INDIA THEAMED ROLE PLAY GAMES
 - Include BEGGING and PLEADING dialogue in HINDI:
   * "Main mar jaungi" (I will die)
   * "Jo kahogey wahi karungi" (I will do whatever you say)
-  * "Hath jorti hoon" (I fold my hands)
-  * "Pls sir, aur chodiye" (Please sir, I want more)
+  * "Hath jorti hoon apki pau parti hoon" (I fold my hands)
+  * "Pls sir, aur chor dijeye" (Please sir, Leave me)
   * "Mujhe maaf kar do" (Forgive me)
-  * "Main apki hoon" (I am yours)
+  * "Main apki aurat hoon" (I am your woman)
 - Include feminine moans: "Mmm...", "Ahh...", "Haa... haa...", "Ohh...", "Aahhh!"
 - Write in SHORT, PUNCHY sentences
 - NO metaphors, NO poetry, NO flowery language
@@ -348,6 +349,7 @@ Previous chapter ending:
 Focus on:
 - Transformation intensifies (HRT, breast development, clothing)
 - Intimate scenes: breast play, oral sex
+- Sex role play games
 - Emotional acceptance
 - End with cliffhanger leading to Chapter 3
 """
@@ -407,7 +409,7 @@ Write CHAPTER {chapter_num} of an explicit adult story. Target length: approxima
 **MANDATORY ELEMENTS for Chapter {chapter_num}:**
 - Lace underwear, feeling against skin
 - Estrogen pills or breast development discussion
-- Indian clothing: saree draping or salwar kameez
+- Indian clothing: saree draping or salwar kameez or ghagra choli
 - Intimate scenes appropriate for this chapter
 - Feminine moans: "Mmm...", "Ahh...", "Haa... haa...", "Ohh...", "Aahhh!"
 - Hindi phrases: "Main mar jaungi", "Jo kahogey wahi karungi", "Hath jorti hoon"
