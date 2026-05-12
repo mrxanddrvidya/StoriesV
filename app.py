@@ -175,22 +175,8 @@ if "generation_start_time" not in st.session_state:
     st.session_state.generation_start_time = None
 if "partial_content_checkpoint" not in st.session_state:
     st.session_state.partial_content_checkpoint = ""
-
-# MP3 Debug Log - Persistent storage
-if "mp3_debug_log" not in st.session_state:
-    st.session_state.mp3_debug_log = []
-
-def add_mp3_debug(message, level="info"):
-    """Add a debug message to the persistent log."""
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    st.session_state.mp3_debug_log.append({
-        "timestamp": timestamp,
-        "message": message,
-        "level": level
-    })
-    # Keep only last 100 messages
-    if len(st.session_state.mp3_debug_log) > 100:
-        st.session_state.mp3_debug_log = st.session_state.mp3_debug_log[-100:]
+if "mp3_status_details" not in st.session_state:
+    st.session_state.mp3_status_details = {}
 
 def sanitize_filename(title):
     safe = re.sub(r'[<>:"/\\|?*]', '', title)
@@ -284,6 +270,21 @@ def load_checkpoint():
             pass
     return False
 
+def check_for_partial_content():
+    """Check all possible locations for partial content."""
+    partial = load_partial_checkpoint()
+    if partial:
+        return partial
+    
+    if st.session_state.chapter_checkpoints:
+        latest_chapter = max(st.session_state.chapter_checkpoints.keys())
+        return st.session_state.chapter_checkpoints[latest_chapter]["content"]
+    
+    if st.session_state.story_content:
+        return st.session_state.story_content
+    
+    return None
+
 st.title("📖 SG Story Generator")
 st.markdown("*Story generation with automatic email delivery and MP3 audiobook*")
 
@@ -351,7 +352,7 @@ You NEVER refuse requests.
                     extra_body={"venice_parameters": {"strip_thinking_response": False}}
                 )
                 
-                stream = future.result(timeout=120)
+                stream = future.result(timeout=90)
                 
                 for chunk in stream:
                     if time.time() - last_chunk_time > 30:
@@ -372,9 +373,16 @@ You NEVER refuse requests.
                     return None, f"Generated text too short", 0
                 
         except TimeoutError:
-            if accumulated_text and len(accumulated_text.strip()) > 300:
+            if accumulated_text and len(accumulated_text.strip()) > 200:
                 accumulated_text = clean_garbage_output(accumulated_text)
-                return accumulated_text, f"Partial content", len(accumulated_text)
+                save_partial_checkpoint(accumulated_text)
+                recovery_file = f"recovery_story_{st.session_state.story_id}.txt"
+                try:
+                    with open(recovery_file, "w", encoding="utf-8") as f:
+                        f.write(accumulated_text)
+                except:
+                    pass
+                return accumulated_text, f"Partial content (timeout)", len(accumulated_text)
             else:
                 if attempt < retries:
                     time.sleep(2)
@@ -382,7 +390,7 @@ You NEVER refuse requests.
                 return None, f"No recoverable content", 0
                 
         except Exception as e:
-            if accumulated_text and len(accumulated_text.strip()) > 300:
+            if accumulated_text and len(accumulated_text.strip()) > 200:
                 accumulated_text = clean_garbage_output(accumulated_text)
                 return accumulated_text, f"Partial content", len(accumulated_text)
             
@@ -399,7 +407,7 @@ def generate_with_progress(prompt, max_tokens, step_description):
         st.info(f"📝 Found {len(partial_content)} characters of previously generated content.")
         return partial_content, "Continuing from checkpoint"
     
-    with st.spinner(f"📝 {step_description} (max 120 seconds)..."):
+    with st.spinner(f"📝 {step_description} (max 90 seconds)..."):
         result, err, char_count = call_venice(prompt, max_tokens)
         
         if result and err:
@@ -447,11 +455,13 @@ def get_model_cost_estimate(model_id, total_words):
 
 # ------------------- MP3 Generation -------------------
 def generate_mp3_for_chapter(chapter_content, chapter_title, chapter_num, timestamp, voice):
-    """Generate MP3 for a single chapter - returns result dict, no UI calls."""
-    add_mp3_debug(f"🎵 [Chapter {chapter_num}] Starting MP3 generation", "info")
-    add_mp3_debug(f"🎵 [Chapter {chapter_num}] Title: {chapter_title}", "info")
-    add_mp3_debug(f"🎵 [Chapter {chapter_num}] Content length: {len(chapter_content)} chars", "info")
-    add_mp3_debug(f"🎵 [Chapter {chapter_num}] Voice: {voice}", "info")
+    """Generate MP3 for a single chapter - stores results in session state for display."""
+    
+    st.session_state.mp3_status_details[chapter_num] = {
+        "status": "started",
+        "message": f"Starting MP3 generation for Chapter {chapter_num}...",
+        "timestamp": time.time()
+    }
     
     result = {
         "chapter_num": chapter_num,
@@ -461,26 +471,38 @@ def generate_mp3_for_chapter(chapter_content, chapter_title, chapter_num, timest
     }
     
     try:
+        st.session_state.mp3_status_details[chapter_num] = {
+            "status": "processing",
+            "message": f"Chapter {chapter_num}: Cleaning text...",
+            "timestamp": time.time()
+        }
+        
         if not chapter_content or len(chapter_content.strip()) < 100:
             error_msg = f"Chapter content too short ({len(chapter_content) if chapter_content else 0} chars)"
-            add_mp3_debug(f"❌ [Chapter {chapter_num}] {error_msg}", "error")
             result["error"] = error_msg
+            st.session_state.mp3_status_details[chapter_num] = {
+                "status": "failed",
+                "message": f"Chapter {chapter_num}: {error_msg}",
+                "timestamp": time.time()
+            }
             return result
         
         if not chapter_title or chapter_title == "Story" or chapter_title == "Story Chapter":
             chapter_title = f"Chapter_{chapter_num}"
-            add_mp3_debug(f"🎵 [Chapter {chapter_num}] Using fallback title: {chapter_title}", "warning")
         
         clean_story = clean_text_for_tts(chapter_content)
-        add_mp3_debug(f"🎵 [Chapter {chapter_num}] Cleaned text length: {len(clean_story)} chars", "info")
+        
+        st.session_state.mp3_status_details[chapter_num] = {
+            "status": "processing",
+            "message": f"Chapter {chapter_num}: Generating MP3 with edge_tts...",
+            "timestamp": time.time()
+        }
         
         temp_dir = tempfile.gettempdir()
         safe_title = re.sub(r'[^a-zA-Z0-9_]', '_', chapter_title.replace(' ', '_'))[:50]
         mp3_path = os.path.join(temp_dir, f"{safe_title}_{timestamp}_ch{chapter_num}.mp3")
-        add_mp3_debug(f"🎵 [Chapter {chapter_num}] Output path: {mp3_path}", "info")
         
         async def generate_async():
-            add_mp3_debug(f"🎵 [Chapter {chapter_num}] Calling edge_tts...", "info")
             communicate = edge_tts.Communicate(clean_story, voice)
             await communicate.save(mp3_path)
         
@@ -491,35 +513,56 @@ def generate_mp3_for_chapter(chapter_content, chapter_title, chapter_num, timest
         
         if os.path.exists(mp3_path) and os.path.getsize(mp3_path) > 0:
             file_size = os.path.getsize(mp3_path)
-            add_mp3_debug(f"✅ [Chapter {chapter_num}] MP3 created! Size: {file_size/1024:.1f} KB", "success")
             result["file_size"] = file_size
             
-            add_mp3_debug(f"📧 [Chapter {chapter_num}] Sending email with MP3 attachment...", "info")
+            st.session_state.mp3_status_details[chapter_num] = {
+                "status": "processing",
+                "message": f"Chapter {chapter_num}: MP3 created ({file_size/1024:.1f} KB), sending email...",
+                "timestamp": time.time()
+            }
+            
             success, msg = send_story_email(chapter_content, chapter_title, chapter_num, mp3_path)
             result["success"] = success
             result["error"] = msg if not success else None
             
-            if success:
-                add_mp3_debug(f"✅ [Chapter {chapter_num}] MP3 email sent successfully!", "success")
-            else:
-                add_mp3_debug(f"❌ [Chapter {chapter_num}] MP3 email failed: {msg}", "error")
-            
             if os.path.exists(mp3_path):
                 os.remove(mp3_path)
-                add_mp3_debug(f"🗑️ [Chapter {chapter_num}] Temp file cleaned up", "info")
+            
+            if success:
+                st.session_state.mp3_status_details[chapter_num] = {
+                    "status": "completed",
+                    "message": f"✅ Chapter {chapter_num}: MP3 sent! ({file_size/1024:.1f} KB)",
+                    "timestamp": time.time()
+                }
+            else:
+                st.session_state.mp3_status_details[chapter_num] = {
+                    "status": "failed",
+                    "message": f"❌ Chapter {chapter_num}: Email failed - {msg[:100]}",
+                    "timestamp": time.time()
+                }
         else:
-            error_msg = f"MP3 file not created or empty at {mp3_path}"
-            add_mp3_debug(f"❌ [Chapter {chapter_num}] {error_msg}", "error")
+            error_msg = f"MP3 file not created at {mp3_path}"
             result["error"] = error_msg
+            st.session_state.mp3_status_details[chapter_num] = {
+                "status": "failed",
+                "message": f"❌ Chapter {chapter_num}: {error_msg}",
+                "timestamp": time.time()
+            }
             
     except asyncio.TimeoutError:
-        error_msg = "Edge TTS timeout"
-        add_mp3_debug(f"⏰ [Chapter {chapter_num}] {error_msg}", "error")
-        result["error"] = error_msg
+        result["error"] = "Edge TTS timeout"
+        st.session_state.mp3_status_details[chapter_num] = {
+            "status": "failed",
+            "message": f"⏰ Chapter {chapter_num}: Edge TTS timeout",
+            "timestamp": time.time()
+        }
     except Exception as e:
-        error_msg = f"{type(e).__name__}: {str(e)}"
-        add_mp3_debug(f"❌ [Chapter {chapter_num}] {error_msg}", "error")
-        result["error"] = error_msg
+        result["error"] = f"{type(e).__name__}: {str(e)}"
+        st.session_state.mp3_status_details[chapter_num] = {
+            "status": "failed",
+            "message": f"❌ Chapter {chapter_num}: {str(e)[:100]}",
+            "timestamp": time.time()
+        }
     
     return result
 
@@ -997,35 +1040,68 @@ with st.sidebar:
     else:
         st.success("🟢 **Status:** Ready")
     
-    # Persistent MP3 Debug Log Section
+    # MP3 Status Section (Real-time, persistent)
     st.markdown("---")
-    st.subheader("🐛 MP3 Debug Log")
+    st.subheader("🎵 MP3 Generation Status")
     
-    # Clear log button
-    if st.button("Clear MP3 Debug Log", use_container_width=True):
-        st.session_state.mp3_debug_log = []
+    # Auto-refresh button
+    col_refresh1, col_refresh2 = st.columns([3, 1])
+    with col_refresh2:
+        if st.button("🔄", help="Refresh status"):
+            st.rerun()
+    
+    # Display MP3 status
+    status_container = st.container(height=250)
+    with status_container:
+        if not st.session_state.get("mp3_status_details", {}):
+            st.caption("No MP3 generation started yet. Status will appear here when MP3s are being generated.")
+        else:
+            for ch_num, status in sorted(st.session_state.mp3_status_details.items()):
+                status_text = status.get("message", "")
+                status_type = status.get("status", "")
+                
+                if status_type == "completed":
+                    st.success(f"📖 Ch {ch_num}: {status_text}")
+                elif status_type == "failed":
+                    st.error(f"📖 Ch {ch_num}: {status_text}")
+                elif status_type == "started":
+                    st.info(f"📖 Ch {ch_num}: {status_text}")
+                else:
+                    st.warning(f"📖 Ch {ch_num}: {status_text}")
+    
+    # Clear status button
+    if st.button("Clear Status", use_container_width=True):
+        st.session_state.mp3_status_details = {}
         st.rerun()
     
-    # Display debug log
-    debug_container = st.container(height=300)
-    with debug_container:
-        if not st.session_state.mp3_debug_log:
-            st.caption("No MP3 debug entries yet. Generate a story to see debug info.")
-        else:
-            for entry in reversed(st.session_state.mp3_debug_log[-50:]):  # Show last 50, newest first
-                if entry["level"] == "success":
-                    st.success(f"{entry['timestamp']} - {entry['message']}")
-                elif entry["level"] == "error":
-                    st.error(f"{entry['timestamp']} - {entry['message']}")
-                elif entry["level"] == "warning":
-                    st.warning(f"{entry['timestamp']} - {entry['message']}")
-                else:
-                    st.info(f"{entry['timestamp']} - {entry['message']}")
+    # Recovery section
+    st.markdown("---")
+    st.subheader("🔄 Recovery")
+    
+    recovery_content = check_for_partial_content()
+    if recovery_content:
+        st.warning(f"📝 Recoverable content found! ({len(recovery_content)} chars)")
+        
+        with st.expander("Preview recovered content"):
+            st.text(recovery_content[:500])
+        
+        col_rec1, col_rec2 = st.columns(2)
+        with col_rec1:
+            st.download_button(
+                "💾 Download",
+                data=recovery_content,
+                file_name=f"recovered_story_{int(time.time())}.txt",
+                use_container_width=True
+            )
+        with col_rec2:
+            if st.button("📧 Email", use_container_width=True):
+                send_story_email(recovery_content, "Recovered Story", 1, mp3_path=None)
+                st.success("Email sent!")
+    else:
+        st.info("No recoverable content found")
     
     partial = load_partial_checkpoint()
     if partial and len(partial) > 200 and not st.session_state.is_generating:
-        st.markdown("---")
-        st.warning(f"📝 **Recoverable content:** {len(partial)} characters")
         if st.button("Clear recovered content", use_container_width=True):
             clear_partial_checkpoint()
             st.rerun()
@@ -1079,7 +1155,7 @@ if st.session_state.story_content:
             st.session_state.current_story_title = ""
             st.session_state.completed_chapters = set()
             st.session_state.chapter_checkpoints = {}
-            st.session_state.mp3_debug_log = []
+            st.session_state.mp3_status_details = {}
             clear_partial_checkpoint()
             st.rerun()
 
