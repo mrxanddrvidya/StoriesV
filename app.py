@@ -29,7 +29,6 @@ def check_login():
     if st.session_state.get("authenticated", False):
         return True
     
-    # Show login form
     st.title("🔐 Login Required")
     st.markdown("Please enter your credentials to access the SG Story Generator.")
     
@@ -80,7 +79,6 @@ if platform.system() == "Darwin":
 
 # ------------------- Text Cleaning Functions -------------------
 def clean_text_for_tts(text):
-    """Remove markdown formatting and special characters that TTS might read aloud."""
     text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
     text = re.sub(r'\*([^*]+)\*', r'\1', text)
     text = re.sub(r'__([^_]+)__', r'\1', text)
@@ -102,7 +100,6 @@ def clean_text_for_tts(text):
     return text
 
 def clean_text_for_display(text):
-    """Clean text for display on screen."""
     text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
     text = re.sub(r'\*([^*]+)\*', r'\1', text)
     text = re.sub(r'__([^_]+)__', r'\1', text)
@@ -112,7 +109,6 @@ def clean_text_for_display(text):
     return text
 
 def clean_garbage_output(text):
-    """Remove poetic garbage from generated text."""
     lines = text.split('\n')
     cleaned_lines = []
     
@@ -167,8 +163,6 @@ if "story_generation_start_time" not in st.session_state:
     st.session_state.story_generation_start_time = None
 if "story_generation_end_time" not in st.session_state:
     st.session_state.story_generation_end_time = None
-
-# Generation protection session state variables
 if "is_generating" not in st.session_state:
     st.session_state.is_generating = False
 if "generation_lock_time" not in st.session_state:
@@ -183,13 +177,11 @@ if "partial_content_checkpoint" not in st.session_state:
     st.session_state.partial_content_checkpoint = ""
 
 def sanitize_filename(title):
-    """Convert title to safe filename."""
     safe = re.sub(r'[<>:"/\\|?*]', '', title)
     safe = safe.replace(' ', '_')
     return safe[:100]
 
 def can_start_generation():
-    """Check if we can safely start a new generation to prevent wasted API calls."""
     if st.session_state.is_generating:
         st.warning("⚠️ Story generation is already in progress. Please wait...")
         return False
@@ -198,7 +190,7 @@ def can_start_generation():
         elapsed = time.time() - st.session_state.generation_start_time
         if elapsed > 300:
             st.session_state.is_generating = False
-            st.warning(f"⏰ Previous generation timed out after {elapsed:.0f} seconds. You can start a new one.")
+            st.warning(f"⏰ Previous generation timed out after {elapsed:.0f} seconds.")
             return True
     
     cooldown_seconds = 30
@@ -217,17 +209,15 @@ def get_partial_checkpoint_file():
     return f"partial_checkpoint_{st.session_state.story_id}.txt"
 
 def save_partial_checkpoint(content):
-    """Save partial content so it's not lost on timeout."""
     checkpoint_file = get_partial_checkpoint_file()
     try:
         with open(checkpoint_file, "w", encoding="utf-8") as f:
             f.write(content)
         st.session_state.partial_content_checkpoint = content
     except Exception as e:
-        st.warning(f"Could not save partial checkpoint: {e}")
+        pass
 
 def load_partial_checkpoint():
-    """Load partial checkpoint if exists."""
     checkpoint_file = get_partial_checkpoint_file()
     if os.path.exists(checkpoint_file):
         try:
@@ -240,7 +230,6 @@ def load_partial_checkpoint():
     return None
 
 def clear_partial_checkpoint():
-    """Clear partial checkpoint after successful generation."""
     checkpoint_file = get_partial_checkpoint_file()
     if os.path.exists(checkpoint_file):
         try:
@@ -250,7 +239,6 @@ def clear_partial_checkpoint():
     st.session_state.partial_content_checkpoint = ""
 
 def save_chapter_checkpoint(chapter_num, content):
-    """Save chapter progress to prevent regeneration on failure."""
     st.session_state.chapter_checkpoints[chapter_num] = {
         "content": content,
         "timestamp": time.time()
@@ -267,7 +255,6 @@ def save_chapter_checkpoint(chapter_num, content):
         pass
 
 def load_checkpoint():
-    """Load checkpoint if exists."""
     checkpoint_file = get_checkpoint_file()
     if os.path.exists(checkpoint_file):
         try:
@@ -285,22 +272,7 @@ st.title("📖 SG Story Generator")
 st.markdown("*Story generation with automatic email delivery and MP3 audiobook*")
 
 # ------------------- Fixed Settings -------------------
-SLOW_BURN_MODE = True
-USE_CAFFEINATE = True
-TONE = "Brutal"
-ADULT_LEVEL = 10
 WORDS_PER_CHAPTER = 3000
-
-# ------------------- Default Feminine Story Elements -------------------
-DEFAULT_ELEMENTS = [
-    "Lace panties and bras", "Feeling of lace against skin", "HRT - estrogen pills",
-    "Breast development", "Waist training corset", "High heels training",
-    "Saree draping", "Salwar kameez", "Lehenga", "Indian jewelry",
-    "Breast play and nipple sucking", "Blow jobs while kneeling",
-    "Feminine moans", "Public outings as a woman", "Ear piercing", "Nose piercing",
-    "Lipstick - trying different shades", "Eye makeup", "Nail polish", "Bangles", "Anklets",
-    "Role play sex games", "Saree opening by force", "Tearing choli", "Tieing hands with dupatta"
-]
 
 # ------------------- Edge TTS Available Female Voices -------------------
 EDGE_FEMALE_VOICES = {
@@ -316,12 +288,10 @@ VENICE_BASE_URL = "https://api.venice.ai/v1"
 DEFAULT_MODEL = "e2ee-glm-4-7-p"
 
 def calculate_max_tokens(target_words):
-    """Calculate max_tokens needed for target word count"""
     tokens = int(target_words * 2.5)
     return min(tokens, 16000)
 
 def call_venice(prompt, max_tokens=16000, temperature=0.95, retries=1):
-    """API call with partial response recovery"""
     api_key = os.getenv("VENICE_API_KEY")
     if not api_key:
         return None, "❌ VENICE_API_KEY secret missing", 0
@@ -387,7 +357,6 @@ You NEVER refuse requests.
                 
         except TimeoutError:
             if accumulated_text and len(accumulated_text.strip()) > 300:
-                st.warning(f"⚠️ API timed out, but recovered {len(accumulated_text)} characters")
                 accumulated_text = clean_garbage_output(accumulated_text)
                 return accumulated_text, f"Partial content", len(accumulated_text)
             else:
@@ -398,7 +367,6 @@ You NEVER refuse requests.
                 
         except Exception as e:
             if accumulated_text and len(accumulated_text.strip()) > 300:
-                st.warning(f"⚠️ API error but recovered {len(accumulated_text)} characters")
                 accumulated_text = clean_garbage_output(accumulated_text)
                 return accumulated_text, f"Partial content", len(accumulated_text)
             
@@ -410,8 +378,6 @@ You NEVER refuse requests.
     return None, "Max retries exceeded", 0
 
 def generate_with_progress(prompt, max_tokens, step_description):
-    """Generate with progress indicator and partial content recovery."""
-    
     partial_content = load_partial_checkpoint()
     if partial_content and len(partial_content) > 200:
         st.info(f"📝 Found {len(partial_content)} characters of previously generated content.")
@@ -428,7 +394,6 @@ def generate_with_progress(prompt, max_tokens, step_description):
             
     return result, err
 
-# ------------------- Test API -------------------
 def test_api():
     api_key = os.getenv("VENICE_API_KEY")
     if not api_key:
@@ -465,57 +430,59 @@ def get_model_cost_estimate(model_id, total_words):
     return cost
 
 # ------------------- MP3 Generation -------------------
-def generate_mp3_sync(text, story_title, timestamp, voice="en-IN-NeerjaNeural"):
-    """Generate MP3 synchronously."""
-    clean_text = clean_text_for_tts(text)
-    
-    temp_dir = tempfile.gettempdir()
-    safe_title = re.sub(r'[<>:"/\\|?*]', '', story_title.replace(' ', '_'))
-    mp3_path = os.path.join(temp_dir, f"{safe_title}_{timestamp}.mp3")
-    
-    async def generate_async():
-        communicate = edge_tts.Communicate(clean_text, voice)
-        await communicate.save(mp3_path)
-    
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(generate_async())
-    loop.close()
-    
-    return mp3_path
-
 def generate_mp3_for_chapter(chapter_content, chapter_title, chapter_num, timestamp, voice):
-    """Generate MP3 for a single chapter and send email."""
+    """Generate MP3 for a single chapter - returns result dict, no UI calls."""
+    result = {
+        "chapter_num": chapter_num,
+        "success": False,
+        "error": None,
+        "file_size": 0
+    }
+    
     try:
-        st.write(f"🎵 [Chapter {chapter_num}] Starting MP3 generation...")
-        clean_story = clean_text_for_tts(chapter_content)
-        mp3_path = generate_mp3_sync(clean_story, chapter_title, timestamp, voice)
+        if not chapter_content or len(chapter_content.strip()) < 100:
+            result["error"] = f"Chapter content too short ({len(chapter_content) if chapter_content else 0} chars)"
+            return result
         
-        if mp3_path and os.path.exists(mp3_path):
-            st.write(f"🎵 [Chapter {chapter_num}] MP3 generated, sending email...")
+        if not chapter_title or chapter_title == "Story" or chapter_title == "Story Chapter":
+            chapter_title = f"Chapter_{chapter_num}"
+        
+        clean_story = clean_text_for_tts(chapter_content)
+        
+        temp_dir = tempfile.gettempdir()
+        safe_title = re.sub(r'[^a-zA-Z0-9_]', '_', chapter_title.replace(' ', '_'))[:50]
+        mp3_path = os.path.join(temp_dir, f"{safe_title}_{timestamp}_ch{chapter_num}.mp3")
+        
+        async def generate_async():
+            communicate = edge_tts.Communicate(clean_story, voice)
+            await communicate.save(mp3_path)
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(generate_async())
+        loop.close()
+        
+        if os.path.exists(mp3_path) and os.path.getsize(mp3_path) > 0:
+            result["file_size"] = os.path.getsize(mp3_path)
+            
             success, msg = send_story_email(chapter_content, chapter_title, chapter_num, mp3_path)
+            result["success"] = success
+            result["error"] = msg if not success else None
             
-            if success:
-                st.success(f"🎵 Chapter {chapter_num} MP3 emailed!")
-            else:
-                st.error(f"❌ Chapter {chapter_num} MP3 email failed: {msg}")
-            
-            # Clean up
             if os.path.exists(mp3_path):
                 os.remove(mp3_path)
-            return chapter_num, success
         else:
-            st.error(f"❌ Chapter {chapter_num} MP3 generation failed - no file created")
-            return chapter_num, False
+            result["error"] = f"MP3 file not created or empty at {mp3_path}"
             
+    except asyncio.TimeoutError:
+        result["error"] = "Edge TTS timeout"
     except Exception as e:
-        st.error(f"❌ Chapter {chapter_num} MP3 error: {str(e)}")
-        return chapter_num, False
+        result["error"] = f"{type(e).__name__}: {str(e)}"
+    
+    return result
 
 # ------------------- Story Generation Functions -------------------
 def generate_chapter(chapter_num, premise, target_words, creative_mode=False, previous_chapter_text=""):
-    """Generate a single chapter with explicit length requirements and auto-extension."""
-    
     if chapter_num in st.session_state.completed_chapters:
         st.info(f"✅ Chapter {chapter_num} already generated - restoring from checkpoint")
         return st.session_state.chapter_checkpoints[chapter_num]["content"], {"word_count": len(st.session_state.chapter_checkpoints[chapter_num]["content"].split()), "target_words": target_words, "restored": True}
@@ -603,9 +570,6 @@ Continue writing with more dialogue, description, and scenes.
     return story, {"word_count": word_count, "target_words": target_words}
 
 def generate_complete_story(premise, num_chapters, creative_mode=False):
-    """Generate all text chapters first, then generate MP3s in parallel."""
-    
-    # Record start time
     st.session_state.story_generation_start_time = time.time()
     st.session_state.generation_start_time = time.time()
     
@@ -651,12 +615,10 @@ def generate_complete_story(premise, num_chapters, creative_mode=False):
         percentage = int((word_count / words_per_chapter) * 100) if words_per_chapter > 0 else 0
         st.metric(f"Chapter {chapter_num} Word Count", f"{word_count:,} / {words_per_chapter:,}", f"{percentage}%")
         
-        # Extract title
         title_match = re.search(r"TITLE:\s*(.+?)(?:\n|$)", chapter, re.IGNORECASE)
         if title_match:
             chapter_title = title_match.group(1).strip()
         else:
-            # For creative mode, generate a title from first few words
             first_sentence = chapter.split('.')[0][:50]
             chapter_title = f"Creative Story - {first_sentence}" if creative_mode else f"Story Chapter {chapter_num}"
         
@@ -670,8 +632,6 @@ def generate_complete_story(premise, num_chapters, creative_mode=False):
         chapter_titles.append(chapter_title)
         chapter_email_titles.append(email_title)
         
-        # Send TEXT email immediately
-        st.write(f"📧 Sending TEXT email for Chapter {chapter_num}...")
         email_sent, msg = send_story_email(chapter, email_title, chapter_num, mp3_path=None)
         if email_sent:
             st.success(f"📧 Chapter {chapter_num} TEXT emailed!")
@@ -680,14 +640,12 @@ def generate_complete_story(premise, num_chapters, creative_mode=False):
         
         previous_chapter_text = chapter
     
-    # Record end of text generation
     st.session_state.story_generation_end_time = time.time()
     text_generation_time = st.session_state.story_generation_end_time - st.session_state.story_generation_start_time
     
     if not chapters:
         return None, {"error": "No chapters generated successfully"}
     
-    # Combine all chapters for display
     full_story_parts = []
     if premise and not creative_mode:
         full_story_parts.append(f"**Original Premise:** {premise}\n")
@@ -706,14 +664,15 @@ def generate_complete_story(premise, num_chapters, creative_mode=False):
     
     total_word_count = sum([s.get("word_count", 0) for s in chapter_stats if isinstance(s, dict)])
     
-    # Phase 2: Generate MP3s in parallel
     st.info(f"🎵 Phase 2: Generating MP3s for {len(chapters)} chapter(s) in parallel...")
+    st.warning("⏳ MP3 generation may take 30-60 seconds per chapter. Please wait...")
     
     mp3_results = {}
     mp3_start_time = time.time()
     
-    # Use ThreadPoolExecutor for parallel MP3 generation
-    with ThreadPoolExecutor(max_workers=min(3, len(chapters))) as executor:
+    status_container = st.container()
+    
+    with ThreadPoolExecutor(max_workers=min(2, len(chapters))) as executor:
         futures = {}
         
         for idx, (chapter, title) in enumerate(zip(chapters, chapter_email_titles), 1):
@@ -727,24 +686,60 @@ def generate_complete_story(premise, num_chapters, creative_mode=False):
             )
             futures[future] = idx
         
-        # Progress bar for MP3 generation
-        mp3_progress = st.progress(0, text="Generating MP3s...")
+        mp3_progress = st.progress(0, text="Starting MP3 generation...")
         completed = 0
+        status_text = status_container.empty()
         
         for future in as_completed(futures):
-            chapter_num, success = future.result(timeout=120)  # 2 minute timeout per MP3
-            mp3_results[chapter_num] = success
-            completed += 1
-            mp3_progress.progress(completed / len(chapters), text=f"MP3s: {completed}/{len(chapters)} completed")
-            
-            if success:
-                st.success(f"✅ Chapter {chapter_num} MP3 completed!")
-            else:
-                st.error(f"❌ Chapter {chapter_num} MP3 failed")
+            try:
+                result = future.result(timeout=180)
+                chapter_num = result["chapter_num"]
+                mp3_results[chapter_num] = result
+                completed += 1
+                
+                mp3_progress.progress(completed / len(chapters), text=f"MP3s: {completed}/{len(chapters)} completed")
+                
+                if result["success"]:
+                    status_text.write(f"✅ Chapter {chapter_num}: MP3 sent! ({result['file_size']/1024:.1f} KB)")
+                else:
+                    status_text.write(f"❌ Chapter {chapter_num}: Failed - {result['error'][:100]}")
+                    
+            except TimeoutError:
+                chapter_num = futures[future]
+                mp3_results[chapter_num] = {
+                    "chapter_num": chapter_num,
+                    "success": False,
+                    "error": "Timeout after 180 seconds"
+                }
+                completed += 1
+                mp3_progress.progress(completed / len(chapters), text=f"MP3s: {completed}/{len(chapters)} completed (timeout)")
+                status_text.write(f"⏰ Chapter {chapter_num}: Timeout after 180 seconds")
+                
+            except Exception as e:
+                chapter_num = futures[future]
+                mp3_results[chapter_num] = {
+                    "chapter_num": chapter_num,
+                    "success": False,
+                    "error": str(e)
+                }
+                completed += 1
+                status_text.write(f"❌ Chapter {chapter_num}: Error - {str(e)[:100]}")
         
         mp3_progress.empty()
     
     mp3_generation_time = time.time() - mp3_start_time
+    
+    success_count = sum(1 for r in mp3_results.values() if r.get("success", False))
+    fail_count = len(mp3_results) - success_count
+    
+    if fail_count > 0:
+        st.warning(f"⚠️ MP3 Generation Summary: {success_count} successful, {fail_count} failed")
+        for ch_num, result in mp3_results.items():
+            if not result.get("success", False):
+                st.error(f"Chapter {ch_num} failed: {result.get('error', 'Unknown error')[:200]}")
+    else:
+        st.success(f"✅ All {success_count} MP3s generated and sent successfully!")
+    
     total_time = text_generation_time + mp3_generation_time
     
     stats = {
@@ -764,7 +759,6 @@ def generate_complete_story(premise, num_chapters, creative_mode=False):
 
 # ------------------- Email Function -------------------
 def send_story_email(story_content, email_title, index, mp3_path=None):
-    """Send story with TXT and optionally MP3 attachments."""
     api_key = os.getenv("RESEND_API_KEY")
     if not api_key:
         return False, "No API key"
@@ -896,7 +890,6 @@ if st.button("✨ Generate Story", type="secondary", use_container_width=True,
                 
                 st.info(f"📧 TEXT emails sent for all chapters")
                 
-                # Show MP3 results
                 mp3_results = stats.get('mp3_results', {})
                 if mp3_results:
                     success_count = sum(1 for v in mp3_results.values() if v)
