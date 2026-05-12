@@ -9,7 +9,6 @@ import base64
 import requests
 import asyncio
 import tempfile
-import threading
 from openai import OpenAI
 from datetime import datetime
 import edge_tts
@@ -89,8 +88,10 @@ def clean_garbage_output(text):
     return result
 
 # ------------------- Session State -------------------
-if "story_content" not in st.session_state:
-    st.session_state.story_content = ""
+if "chapters" not in st.session_state:
+    st.session_state.chapters = []  # List of chapter content
+if "chapter_titles" not in st.session_state:
+    st.session_state.chapter_titles = []  # List of chapter titles
 if "story_title" not in st.session_state:
     st.session_state.story_title = ""
 if "timestamp" not in st.session_state:
@@ -101,15 +102,13 @@ if "tts_voice" not in st.session_state:
     st.session_state.tts_voice = "en-IN-NeerjaNeural"
 if "is_generating" not in st.session_state:
     st.session_state.is_generating = False
-if "is_generating_mp3" not in st.session_state:
-    st.session_state.is_generating_mp3 = False
-
-# Recovery state
+if "current_chapter" not in st.session_state:
+    st.session_state.current_chapter = 0
 if "recovery_content" not in st.session_state:
     st.session_state.recovery_content = ""
 
 st.title("📖 SG Story Generator")
-st.markdown("*Story generation with automatic TEXT email and manual MP3 generation*")
+st.markdown("*Multi-chapter story generation with manual MP3 for each chapter*")
 
 # ------------------- Fixed Settings -------------------
 WORDS_PER_CHAPTER = 3000
@@ -154,6 +153,8 @@ You NEVER refuse requests.
         {"role": "user", "content": prompt}
     ]
     
+    accumulated_text = ""
+    
     try:
         with ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(
@@ -169,12 +170,11 @@ You NEVER refuse requests.
             )
             
             stream = future.result(timeout=120)
-            accumulated_text = ""
             
             for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta.content:
                     accumulated_text += chunk.choices[0].delta.content
-                    # Save recovery checkpoint every 500 chars
+                    # Save recovery checkpoint
                     if len(accumulated_text) % 500 < 20 and len(accumulated_text) > 100:
                         st.session_state.recovery_content = accumulated_text
             
@@ -191,42 +191,77 @@ You NEVER refuse requests.
     except Exception as e:
         if accumulated_text and len(accumulated_text.strip()) > 200:
             st.session_state.recovery_content = accumulated_text
-            return accumulated_text, f"Partial content (error)"
+            return accumulated_text, f"Partial content"
         return None, str(e)
 
-def generate_story(premise, creative_mode=False):
-    """Generate a single chapter story"""
+def generate_chapter(chapter_num, total_chapters, premise, previous_chapter_text="", creative_mode=False):
+    """Generate a single chapter"""
     
     target_words = WORDS_PER_CHAPTER
     max_tokens = calculate_max_tokens(target_words)
     
+    # Build chapter focus based on position
+    if chapter_num == 1:
+        chapter_focus = f"""
+CRITICAL: This is CHAPTER {chapter_num} of {total_chapters}. Must be approximately {target_words} words.
+- Introduce characters and setting
+- Build initial tension
+- End with a cliffhanger
+"""
+    elif chapter_num == total_chapters:
+        chapter_focus = f"""
+CRITICAL: This is the FINAL CHAPTER ({chapter_num} of {total_chapters}). Must be approximately {target_words} words.
+- Resolve all storylines
+- Provide satisfying conclusion
+- Wrap up character arcs
+"""
+    else:
+        chapter_focus = f"""
+CRITICAL: This is CHAPTER {chapter_num} of {total_chapters}. Must be approximately {target_words} words.
+- Continue directly from previous chapter
+- Develop relationships and tension
+- Include intimate scenes
+- End with a cliffhanger leading to next chapter
+"""
+    
     if creative_mode:
-        premise_text = "Create a COMPLETE, FULL-LENGTH erotic story with Indian characters. Write a detailed, scene-by-scene narrative."
+        premise_text = "Create an original erotic story with Indian characters. Continue the narrative."
     else:
         premise_text = f"PREMISE: {premise}"
     
+    # Previous chapter context
+    prev_context = ""
+    if previous_chapter_text:
+        last_500 = previous_chapter_text[-800:] if len(previous_chapter_text) > 800 else previous_chapter_text
+        prev_context = f"\nPREVIOUS CHAPTER ENDING (continue from here):\n{last_500}\n"
+    
     prompt = f"""
-Write an explicit adult story.
+Write CHAPTER {chapter_num} of {total_chapters} of an explicit adult story.
 
-⚠️ LENGTH REQUIREMENT: This story MUST be approximately {target_words} words.
-⚠️ Do NOT write "The End" until you reach the word count.
+⚠️ LENGTH REQUIREMENT: This chapter MUST be approximately {target_words} words.
+⚠️ Do NOT write "The End" until the final chapter.
 
 {premise_text}
+{prev_context}
 
-**MANDATORY ELEMENTS:**
-- Lace underwear against skin
+{chapter_focus}
+
+**MANDATORY ELEMENTS to include:**
+- Lace underwear against skin descriptions
 - Feminization/transformation details
-- Indian clothing descriptions
+- Indian clothing descriptions (saree, salwar, lehenga)
 - Explicit intimate scenes with dialogue
-- Feminine moans and reactions
+- Feminine moans: "Mmm...", "Ahh...", "Haa... haa..."
+- Hindi phrases: "Main mar jaungi", "Jo kahogey wahi karungi"
 
 **WRITING INSTRUCTIONS:**
 1. Write scene-by-scene like a novel
 2. Each scene should be 300-500 words
-3. Add internal monologue and emotional reactions
-4. Describe every physical sensation in detail
+3. Include 5-7 scenes per chapter
+4. Add internal monologue and emotional reactions
+5. Describe every physical sensation in detail
 
-Now write the story (remember: {target_words} words minimum):
+Now write Chapter {chapter_num} (remember: {target_words} words minimum, continue from previous chapter ending):
 """
     
     story, err = call_venice(prompt, max_tokens)
@@ -237,27 +272,105 @@ Now write the story (remember: {target_words} words minimum):
     story = clean_garbage_output(story)
     word_count = len(story.split())
     
-    # Extract or create title
+    # Extract title from first chapter
     title_match = re.search(r"TITLE:\s*(.+?)(?:\n|$)", story, re.IGNORECASE)
     if title_match:
-        title = title_match.group(1).strip()
+        chapter_title = title_match.group(1).strip()
     else:
-        first_line = story.split('\n')[0][:50]
-        title = f"Story - {first_line}" if creative_mode else premise[:50]
+        chapter_title = f"Chapter {chapter_num}"
     
-    return story, {"word_count": word_count, "target_words": target_words, "title": title}
+    return story, {"word_count": word_count, "target_words": target_words, "title": chapter_title}
+
+def generate_complete_story(premise, num_chapters, creative_mode=False):
+    """Generate all chapters sequentially"""
+    
+    chapters = []
+    chapter_titles = []
+    chapter_stats = []
+    previous_text = ""
+    
+    progress_bar = st.progress(0, text="Starting generation...")
+    
+    for chapter_num in range(1, num_chapters + 1):
+        # Update progress
+        progress_bar.progress((chapter_num - 1) / num_chapters, 
+                             text=f"Generating Chapter {chapter_num} of {num_chapters}...")
+        
+        st.info(f"📖 Generating Chapter {chapter_num} of {num_chapters} (target: {WORDS_PER_CHAPTER:,} words)...")
+        
+        chapter, stats = generate_chapter(
+            chapter_num, num_chapters, premise, previous_text, creative_mode
+        )
+        
+        if not chapter:
+            st.error(f"Chapter {chapter_num} failed: {stats}")
+            break
+        
+        chapters.append(chapter)
+        chapter_titles.append(stats["title"])
+        chapter_stats.append(stats)
+        
+        # Show word count
+        word_count = stats["word_count"]
+        percentage = int((word_count / WORDS_PER_CHAPTER) * 100)
+        st.metric(f"Chapter {chapter_num}", f"{word_count:,} / {WORDS_PER_CHAPTER:,} words", f"{percentage}%")
+        
+        # Send TEXT email for this chapter
+        email_title = f"{st.session_state.story_title} (Chapter {chapter_num} of {num_chapters})" if st.session_state.story_title else f"Chapter {chapter_num}"
+        if chapter_num == 1 and stats["title"]:
+            st.session_state.story_title = stats["title"]
+            email_title = f"{stats['title']} (Chapter {chapter_num} of {num_chapters})"
+        
+        with st.spinner(f"Sending TEXT email for Chapter {chapter_num}..."):
+            success, msg = send_email(chapter, email_title, chapter_num, mp3_path=None)
+            if success:
+                st.success(f"📧 Chapter {chapter_num} TEXT emailed!")
+            else:
+                st.warning(f"⚠️ Chapter {chapter_num} email failed")
+        
+        previous_text = chapter
+        time.sleep(0.5)  # Small pause between chapters
+    
+    progress_bar.progress(1.0, text="Generation complete!")
+    progress_bar.empty()
+    
+    if not chapters:
+        return None, {"error": "No chapters generated"}
+    
+    # Combine all chapters
+    full_story_parts = []
+    full_story_parts.append(f"**Story Title:** {st.session_state.story_title}\n")
+    full_story_parts.append(f"**Total Chapters:** {len(chapters)} | **Words per chapter:** {WORDS_PER_CHAPTER:,}\n")
+    full_story_parts.append("---\n")
+    
+    for i, chapter in enumerate(chapters, 1):
+        full_story_parts.append(f"## Chapter {i}\n\n{chapter}\n\n---\n")
+    
+    full_story = "\n".join(full_story_parts)
+    
+    total_words = sum([s["word_count"] for s in chapter_stats])
+    stats = {
+        "chapters": chapters,
+        "chapter_titles": chapter_titles,
+        "chapter_stats": chapter_stats,
+        "total_words": total_words,
+        "target_words": WORDS_PER_CHAPTER * len(chapters),
+        "story_title": st.session_state.story_title
+    }
+    
+    return full_story, stats
 
 # ------------------- Email Function -------------------
-def send_email(story_content, story_title, index, mp3_path=None):
+def send_email(story_content, email_title, chapter_num, mp3_path=None):
     api_key = os.getenv("RESEND_API_KEY")
     if not api_key:
         return False, "No API key"
     
     story_clean = clean_text_for_display(story_content)
     story_clean = story_clean.encode('utf-8', 'ignore').decode('utf-8')
-    story_title_clean = story_title.encode('utf-8', 'ignore').decode('utf-8')[:100]
+    email_title_clean = email_title.encode('utf-8', 'ignore').decode('utf-8')[:100]
     
-    safe_filename = re.sub(r'[<>:"/\\|?*]', '', story_title_clean.replace(' ', '_'))[:50]
+    safe_filename = re.sub(r'[<>:"/\\|?*]', '', email_title_clean.replace(' ', '_'))[:50]
     
     attachments = [
         {"filename": f"{safe_filename}.txt", "content": base64.b64encode(story_clean.encode("utf-8")).decode("utf-8"), "encoding": "base64"}
@@ -275,8 +388,8 @@ def send_email(story_content, story_title, index, mp3_path=None):
     payload = {
         "from": "PBAppAS <onboarding@resend.dev>",
         "to": "mrxanddrvidya2023@gmail.com",
-        "subject": f"Story: {story_title_clean}{subject_suffix}",
-        "text": f"Your story ({story_title_clean}) is attached.{' MP3 audiobook included.' if has_mp3 else ''}",
+        "subject": f"Story Part {chapter_num}: {email_title_clean}{subject_suffix}",
+        "text": f"Your story part #{chapter_num} ({email_title_clean}) is attached.{' MP3 audiobook included.' if has_mp3 else ''}",
         "attachments": attachments
     }
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -305,12 +418,12 @@ def generate_mp3(text, title, voice):
     
     return mp3_path if os.path.exists(mp3_path) else None
 
-def generate_and_send_mp3(story_content, story_title, voice):
+def generate_and_send_mp3(story_content, story_title, chapter_num, voice):
     """Generate MP3 and send email"""
     try:
         mp3_path = generate_mp3(story_content, story_title, voice)
         if mp3_path:
-            success, msg = send_email(story_content, story_title, 1, mp3_path)
+            success, msg = send_email(story_content, story_title, chapter_num, mp3_path)
             os.remove(mp3_path)
             return success, msg
         return False, "MP3 generation failed"
@@ -325,14 +438,14 @@ with col1:
     num_chapters = st.number_input(
         "Number of Chapters",
         min_value=1,
-        max_value=1,
+        max_value=5,
         value=1,
         step=1,
-        disabled=True,
-        help="Currently only 1 chapter mode available"
+        help="Choose 1-5 chapters. Each chapter is exactly 3000 words."
     )
 with col2:
-    st.metric("Target Words", f"{WORDS_PER_CHAPTER:,}")
+    st.metric("Words per Chapter", f"{WORDS_PER_CHAPTER:,}")
+    st.caption(f"Total words: {num_chapters * WORDS_PER_CHAPTER:,}")
 
 creative_mode = st.checkbox("🎨 Creative Mode", value=st.session_state.creative_mode)
 st.session_state.creative_mode = creative_mode
@@ -348,7 +461,7 @@ else:
     )
 
 if premise or creative_mode:
-    total_words = WORDS_PER_CHAPTER
+    total_words = num_chapters * WORDS_PER_CHAPTER
     est_cost = (total_words * 1.3 / 1_000_000) * 0.25
     st.caption(f"💰 Estimated cost: **${est_cost:.5f}**")
 
@@ -359,103 +472,111 @@ if st.button("✨ Generate Story", type="primary", use_container_width=True,
         st.warning("Please enter a story premise or enable Creative Mode.")
     else:
         st.session_state.is_generating = True
+        st.session_state.chapters = []
+        st.session_state.chapter_titles = []
         st.session_state.recovery_content = ""
         
         try:
-            with st.spinner(f"Generating story (up to 120 seconds)..."):
-                story, stats = generate_story(premise, creative_mode)
+            full_story, stats = generate_complete_story(premise, num_chapters, creative_mode)
             
-            if story:
-                st.session_state.story_content = story
-                st.session_state.story_title = stats["title"]
+            if full_story:
+                st.session_state.chapters = stats["chapters"]
+                st.session_state.chapter_titles = stats["chapter_titles"]
+                st.session_state.story_title = stats["story_title"]
                 
-                word_count = stats["word_count"]
-                target = stats["target_words"]
-                percentage = int((word_count / target) * 100)
+                total_words = stats["total_words"]
+                target_words = stats["target_words"]
+                percentage = int((total_words / target_words) * 100)
                 
-                if word_count < target:
-                    st.warning(f"⚠️ Story generated: {word_count:,} / {target:,} words ({percentage}%)")
+                if total_words < target_words:
+                    st.warning(f"⚠️ Story complete: {total_words:,} / {target_words:,} words ({percentage}%)")
                 else:
-                    st.success(f"✅ Story generated: {word_count:,} / {target:,} words ({percentage}%)")
+                    st.success(f"✅ Story complete! {total_words:,} / {target_words:,} words ({percentage}%)")
                 
-                # Send TEXT email
-                with st.spinner("Sending TEXT email..."):
-                    success, msg = send_email(story, stats["title"], 1, mp3_path=None)
-                    if success:
-                        st.success("📧 TEXT email sent!")
-                    else:
-                        st.error(f"❌ Email failed: {msg}")
-                
-                # Save to session for MP3 generation
-                st.session_state.generated_story = story
-                st.session_state.generated_title = stats["title"]
-                
+                st.info(f"📧 TEXT emails sent for all {len(stats['chapters'])} chapters")
                 st.rerun()
             else:
                 st.error(f"❌ Story generation failed: {stats}")
-                if st.session_state.recovery_content:
-                    st.warning(f"📝 Recovered {len(st.session_state.recovery_content)} characters available in Recovery section")
                 
         except Exception as e:
             st.error(f"❌ Error: {str(e)}")
         finally:
             st.session_state.is_generating = False
 
-# Display generated story
-if st.session_state.story_content:
+# Display generated chapters
+if st.session_state.chapters:
     st.subheader("📖 Generated Story")
     
-    # Show word count
-    word_count = len(st.session_state.story_content.split())
-    st.caption(f"Word count: {word_count:,} / {WORDS_PER_CHAPTER:,}")
+    # Overall stats
+    total_words = sum(len(ch.split()) for ch in st.session_state.chapters)
+    target_total = len(st.session_state.chapters) * WORDS_PER_CHAPTER
+    percentage = int((total_words / target_total) * 100)
+    st.caption(f"📊 Total: {total_words:,} / {target_total:,} words ({percentage}%) across {len(st.session_state.chapters)} chapter(s)")
     
-    # Display story (truncated if too long)
-    display_story = clean_text_for_display(st.session_state.story_content)
-    if len(display_story) > 3000:
-        st.write(display_story[:3000])
-        st.info("Story truncated for display. Download full story below.")
-    else:
-        st.write(display_story)
+    # Download full story
+    full_story_parts = []
+    full_story_parts.append(f"**Story Title:** {st.session_state.story_title}\n")
+    full_story_parts.append(f"**Total Chapters:** {len(st.session_state.chapters)}\n")
+    full_story_parts.append("---\n")
+    for i, chapter in enumerate(st.session_state.chapters, 1):
+        full_story_parts.append(f"## Chapter {i}\n\n{chapter}\n\n---\n")
+    full_story = "\n".join(full_story_parts)
     
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        safe_title = re.sub(r'[<>:"/\\|?*]', '', st.session_state.story_title.replace(' ', '_'))[:50]
-        st.download_button(
-            "💾 Download TXT",
-            data=st.session_state.story_content,
-            file_name=f"{safe_title}.txt",
-            use_container_width=True
-        )
+    safe_title = re.sub(r'[<>:"/\\|?*]', '', st.session_state.story_title.replace(' ', '_'))[:50]
+    st.download_button(
+        "💾 Download Complete Story (TXT)",
+        data=full_story,
+        file_name=f"{safe_title}_{len(st.session_state.chapters)}chapters.txt",
+        use_container_width=True
+    )
     
-    with col2:
-        if st.button("🔊 Generate MP3", use_container_width=True, 
-                     disabled=st.session_state.is_generating_mp3):
-            st.session_state.is_generating_mp3 = True
-            with st.spinner("Generating MP3 (30-60 seconds)..."):
-                success, msg = generate_and_send_mp3(
-                    st.session_state.story_content,
-                    st.session_state.story_title,
-                    st.session_state.tts_voice
-                )
-                if success:
-                    st.success("🎵 MP3 generated and emailed!")
-                else:
-                    st.error(f"❌ MP3 failed: {msg}")
-            st.session_state.is_generating_mp3 = False
-            st.rerun()
+    # Display each chapter with MP3 button
+    st.markdown("---")
+    st.subheader("📑 Chapters")
     
-    with col3:
-        if st.button("🆕 Clear", use_container_width=True):
-            st.session_state.story_content = ""
-            st.session_state.story_title = ""
-            st.session_state.recovery_content = ""
-            st.rerun()
+    for idx, (chapter, title) in enumerate(zip(st.session_state.chapters, st.session_state.chapter_titles), 1):
+        with st.expander(f"Chapter {idx}: {title[:50]}... ({len(chapter.split()):,} words)"):
+            # Show chapter preview
+            display_chapter = clean_text_for_display(chapter)
+            if len(display_chapter) > 1000:
+                st.write(display_chapter[:1000])
+                st.caption("(Chapter truncated. Download full story above.)")
+            else:
+                st.write(display_chapter)
+            
+            # MP3 button for this chapter
+            col_mp3, col_info = st.columns([1, 3])
+            with col_mp3:
+                if st.button(f"🔊 MP3 for Chapter {idx}", key=f"mp3_btn_{idx}"):
+                    with st.spinner(f"Generating MP3 for Chapter {idx} (30-60 seconds)..."):
+                        email_title = f"{st.session_state.story_title} (Chapter {idx} of {len(st.session_state.chapters)})"
+                        success, msg = generate_and_send_mp3(
+                            chapter,
+                            email_title,
+                            idx,
+                            st.session_state.tts_voice
+                        )
+                        if success:
+                            st.success(f"🎵 Chapter {idx} MP3 sent to email!")
+                        else:
+                            st.error(f"❌ Chapter {idx} MP3 failed: {msg}")
+            with col_info:
+                st.caption(f"Words: {len(chapter.split()):,} | Target: {WORDS_PER_CHAPTER:,}")
+    
+    # Clear button
+    if st.button("🆕 Clear All", use_container_width=True):
+        st.session_state.chapters = []
+        st.session_state.chapter_titles = []
+        st.session_state.story_title = ""
+        st.session_state.recovery_content = ""
+        st.rerun()
 
 # ------------------- Sidebar -------------------
 with st.sidebar:
     st.header("⚙️ Settings")
     st.caption(f"🤖 Model: **GLM-4-7B**")
-    st.caption(f"📏 Target: **{WORDS_PER_CHAPTER:,} words**")
+    st.caption(f"📏 Per chapter: **{WORDS_PER_CHAPTER:,} words**")
+    st.caption(f"📚 Max chapters: **5**")
     st.markdown("---")
     
     st.subheader("🎤 Voice Settings")
@@ -475,6 +596,7 @@ with st.sidebar:
                 st.success("✅ API Key present")
             else:
                 st.error("❌ VENICE_API_KEY missing")
+                st.info("Add VENICE_API_KEY in Secrets")
     
     st.markdown("---")
     
@@ -482,38 +604,45 @@ with st.sidebar:
     st.subheader("🔄 Recovery")
     
     if st.session_state.recovery_content:
-        st.warning(f"📝 Recovered content: {len(st.session_state.recovery_content)} chars")
+        st.warning(f"📝 Recovered: {len(st.session_state.recovery_content)} chars")
         
-        if st.button("📧 Email Recovered Text", use_container_width=True):
-            with st.spinner("Sending email..."):
-                success, msg = send_email(
-                    st.session_state.recovery_content,
-                    "Recovered Story",
-                    1,
-                    mp3_path=None
-                )
-                if success:
-                    st.success("Email sent!")
-                else:
-                    st.error(f"Failed: {msg}")
-        
-        if st.button("🔊 MP3 from Recovered", use_container_width=True):
-            with st.spinner("Generating MP3..."):
-                success, msg = generate_and_send_mp3(
-                    st.session_state.recovery_content,
-                    "Recovered Story",
-                    st.session_state.tts_voice
-                )
-                if success:
-                    st.success("MP3 sent!")
-                else:
-                    st.error(f"Failed: {msg}")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📧 Email Text", use_container_width=True):
+                with st.spinner("Sending..."):
+                    success, msg = send_email(
+                        st.session_state.recovery_content,
+                        "Recovered Story",
+                        1,
+                        mp3_path=None
+                    )
+                    if success:
+                        st.success("Sent!")
+                    else:
+                        st.error(f"Failed: {msg[:100]}")
+        with col2:
+            if st.button("🔊 MP3", use_container_width=True):
+                with st.spinner("Generating MP3..."):
+                    success, msg = generate_and_send_mp3(
+                        st.session_state.recovery_content,
+                        "Recovered Story",
+                        1,
+                        st.session_state.tts_voice
+                    )
+                    if success:
+                        st.success("MP3 sent!")
+                    else:
+                        st.error(f"Failed: {msg[:100]}")
         
         if st.button("🗑️ Clear Recovery", use_container_width=True):
             st.session_state.recovery_content = ""
             st.rerun()
     else:
-        st.info("No recovered content available")
+        st.info("No recovered content")
     
     st.markdown("---")
-    st.caption("⚡ MP3 generation is manual - click 'Generate MP3' after story completes")
+    st.caption("💡 **How it works:**")
+    st.caption("1. Generate story → TEXT emails sent for each chapter")
+    st.caption("2. Click MP3 button for any chapter")
+    st.caption("3. MP3 will be emailed to you")
+    st.caption("4. Use Recovery if API times out")
