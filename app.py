@@ -21,7 +21,7 @@ from openai import OpenAI
 from datetime import datetime
 import edge_tts
 import backoff
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
 
 # ------------------- LOGIN PAGE -------------------
 def check_login():
@@ -464,9 +464,9 @@ def get_model_cost_estimate(model_id, total_words):
     cost = (tokens / 1_000_000) * price_per_1M
     return cost
 
-# ------------------- MP3 Generation (WORKING VERSION) -------------------
+# ------------------- MP3 Generation -------------------
 def generate_mp3_sync(text, story_title, timestamp, voice="en-IN-NeerjaNeural"):
-    """Generate MP3 synchronously - WORKING VERSION from original code."""
+    """Generate MP3 synchronously."""
     clean_text = clean_text_for_tts(text)
     
     temp_dir = tempfile.gettempdir()
@@ -484,17 +484,33 @@ def generate_mp3_sync(text, story_title, timestamp, voice="en-IN-NeerjaNeural"):
     
     return mp3_path
 
-def send_mp3_email_background(story_content, story_title, index, timestamp, voice):
-    """Background thread for MP3 generation and email - WORKING VERSION."""
+def generate_mp3_for_chapter(chapter_content, chapter_title, chapter_num, timestamp, voice):
+    """Generate MP3 for a single chapter and send email."""
     try:
-        clean_story = clean_text_for_tts(story_content)
-        mp3_path = generate_mp3_sync(clean_story, story_title, timestamp, voice)
-        send_story_email(story_content, story_title, index, mp3_path)
-        if os.path.exists(mp3_path):
-            os.remove(mp3_path)
-        st.success(f"🎵 MP3 for story {index} has been emailed!")
+        st.write(f"🎵 [Chapter {chapter_num}] Starting MP3 generation...")
+        clean_story = clean_text_for_tts(chapter_content)
+        mp3_path = generate_mp3_sync(clean_story, chapter_title, timestamp, voice)
+        
+        if mp3_path and os.path.exists(mp3_path):
+            st.write(f"🎵 [Chapter {chapter_num}] MP3 generated, sending email...")
+            success, msg = send_story_email(chapter_content, chapter_title, chapter_num, mp3_path)
+            
+            if success:
+                st.success(f"🎵 Chapter {chapter_num} MP3 emailed!")
+            else:
+                st.error(f"❌ Chapter {chapter_num} MP3 email failed: {msg}")
+            
+            # Clean up
+            if os.path.exists(mp3_path):
+                os.remove(mp3_path)
+            return chapter_num, success
+        else:
+            st.error(f"❌ Chapter {chapter_num} MP3 generation failed - no file created")
+            return chapter_num, False
+            
     except Exception as e:
-        st.warning(f"MP3 generation failed for story {index}: {e}")
+        st.error(f"❌ Chapter {chapter_num} MP3 error: {str(e)}")
+        return chapter_num, False
 
 # ------------------- Story Generation Functions -------------------
 def generate_chapter(chapter_num, premise, target_words, creative_mode=False, previous_chapter_text=""):
@@ -587,7 +603,7 @@ Continue writing with more dialogue, description, and scenes.
     return story, {"word_count": word_count, "target_words": target_words}
 
 def generate_complete_story(premise, num_chapters, creative_mode=False):
-    """Generate a story with working MP3 background processing."""
+    """Generate all text chapters first, then generate MP3s in parallel."""
     
     # Record start time
     st.session_state.story_generation_start_time = time.time()
@@ -595,10 +611,13 @@ def generate_complete_story(premise, num_chapters, creative_mode=False):
     
     words_per_chapter = WORDS_PER_CHAPTER
     
-    st.info(f"📚 {num_chapters}-Chapter Mode: Each chapter target is {words_per_chapter:,} words")
+    st.info(f"📚 {num_chapters}-Chapter Mode: Generating {num_chapters} chapter(s)")
+    st.info(f"📝 Phase 1: Generating text for all chapters...")
     
     chapters = []
     chapter_stats = []
+    chapter_titles = []
+    chapter_email_titles = []
     previous_chapter_text = ""
     
     for chapter_num in range(1, num_chapters + 1):
@@ -634,7 +653,12 @@ def generate_complete_story(premise, num_chapters, creative_mode=False):
         
         # Extract title
         title_match = re.search(r"TITLE:\s*(.+?)(?:\n|$)", chapter, re.IGNORECASE)
-        chapter_title = title_match.group(1).strip() if title_match else f"Story"
+        if title_match:
+            chapter_title = title_match.group(1).strip()
+        else:
+            # For creative mode, generate a title from first few words
+            first_sentence = chapter.split('.')[0][:50]
+            chapter_title = f"Creative Story - {first_sentence}" if creative_mode else f"Story Chapter {chapter_num}"
         
         if chapter_num == 1:
             st.session_state.current_story_title = chapter_title
@@ -643,36 +667,33 @@ def generate_complete_story(premise, num_chapters, creative_mode=False):
         if num_chapters > 1:
             email_title = f"{st.session_state.current_story_title} (Chapter {chapter_num} of {num_chapters})"
         
+        chapter_titles.append(chapter_title)
+        chapter_email_titles.append(email_title)
+        
         # Send TEXT email immediately
+        st.write(f"📧 Sending TEXT email for Chapter {chapter_num}...")
         email_sent, msg = send_story_email(chapter, email_title, chapter_num, mp3_path=None)
         if email_sent:
             st.success(f"📧 Chapter {chapter_num} TEXT emailed!")
         else:
-            st.warning(f"⚠️ Chapter {chapter_num} TEXT email failed")
-        
-        # Start MP3 generation in background (WORKING VERSION)
-        thread = threading.Thread(
-            target=send_mp3_email_background,
-            args=(chapter, email_title, chapter_num, st.session_state.timestamp, st.session_state.tts_voice),
-            daemon=True
-        )
-        thread.start()
-        st.info(f"🎵 MP3 generation started for Chapter {chapter_num}")
+            st.warning(f"⚠️ Chapter {chapter_num} TEXT email failed: {msg}")
         
         previous_chapter_text = chapter
     
-    # Record end time
+    # Record end of text generation
     st.session_state.story_generation_end_time = time.time()
+    text_generation_time = st.session_state.story_generation_end_time - st.session_state.story_generation_start_time
     
     if not chapters:
         return None, {"error": "No chapters generated successfully"}
     
-    # Combine all chapters
+    # Combine all chapters for display
     full_story_parts = []
     if premise and not creative_mode:
         full_story_parts.append(f"**Original Premise:** {premise}\n")
     full_story_parts.append(f"**Story Title:** {st.session_state.current_story_title}\n")
     full_story_parts.append(f"**Total Chapters:** {len(chapters)} | **Target per chapter:** {words_per_chapter:,} words\n")
+    full_story_parts.append(f"**Text Generation Time:** {text_generation_time:.1f} seconds\n")
     full_story_parts.append("---\n")
     
     for i, chapter in enumerate(chapters, 1):
@@ -684,15 +705,60 @@ def generate_complete_story(premise, num_chapters, creative_mode=False):
         full_story = f"TITLE: {st.session_state.current_story_title}\n\n{full_story}"
     
     total_word_count = sum([s.get("word_count", 0) for s in chapter_stats if isinstance(s, dict)])
-    generation_time = st.session_state.story_generation_end_time - st.session_state.story_generation_start_time
+    
+    # Phase 2: Generate MP3s in parallel
+    st.info(f"🎵 Phase 2: Generating MP3s for {len(chapters)} chapter(s) in parallel...")
+    
+    mp3_results = {}
+    mp3_start_time = time.time()
+    
+    # Use ThreadPoolExecutor for parallel MP3 generation
+    with ThreadPoolExecutor(max_workers=min(3, len(chapters))) as executor:
+        futures = {}
+        
+        for idx, (chapter, title) in enumerate(zip(chapters, chapter_email_titles), 1):
+            future = executor.submit(
+                generate_mp3_for_chapter, 
+                chapter, 
+                title, 
+                idx, 
+                st.session_state.timestamp, 
+                st.session_state.tts_voice
+            )
+            futures[future] = idx
+        
+        # Progress bar for MP3 generation
+        mp3_progress = st.progress(0, text="Generating MP3s...")
+        completed = 0
+        
+        for future in as_completed(futures):
+            chapter_num, success = future.result(timeout=120)  # 2 minute timeout per MP3
+            mp3_results[chapter_num] = success
+            completed += 1
+            mp3_progress.progress(completed / len(chapters), text=f"MP3s: {completed}/{len(chapters)} completed")
+            
+            if success:
+                st.success(f"✅ Chapter {chapter_num} MP3 completed!")
+            else:
+                st.error(f"❌ Chapter {chapter_num} MP3 failed")
+        
+        mp3_progress.empty()
+    
+    mp3_generation_time = time.time() - mp3_start_time
+    total_time = text_generation_time + mp3_generation_time
     
     stats = {
         "word_count": total_word_count, 
         "target_words": words_per_chapter * len(chapters),
         "chapters": len(chapters),
         "chapter_stats": chapter_stats,
-        "generation_time": generation_time
+        "text_generation_time": text_generation_time,
+        "mp3_generation_time": mp3_generation_time,
+        "total_time": total_time,
+        "mp3_results": mp3_results
     }
+    
+    st.success(f"🎉 Story complete! Text: {text_generation_time:.1f}s | MP3s: {mp3_generation_time:.1f}s | Total: {total_time:.1f}s")
     
     return full_story, stats
 
@@ -733,7 +799,7 @@ def send_story_email(story_content, email_title, index, mp3_path=None):
     }
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     try:
-        r = requests.post("https://api.resend.com/emails", json=payload, headers=headers, timeout=30)
+        r = requests.post("https://api.resend.com/emails", json=payload, headers=headers, timeout=60)
         return (r.status_code == 200), r.text if r.status_code != 200 else None
     except Exception as e:
         return False, str(e)
@@ -815,19 +881,26 @@ if st.button("✨ Generate Story", type="secondary", use_container_width=True,
                 total_words_gen = stats['word_count']
                 target_words = stats['target_words']
                 percentage = int((total_words_gen / target_words) * 100) if target_words > 0 else 0
-                generation_time = stats.get('generation_time', 0)
+                text_time = stats.get('text_generation_time', 0)
+                mp3_time = stats.get('mp3_generation_time', 0)
+                total_time = stats.get('total_time', 0)
                 
-                minutes = int(generation_time // 60)
-                seconds = int(generation_time % 60)
+                minutes = int(total_time // 60)
+                seconds = int(total_time % 60)
                 time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
                 
                 if total_words_gen < target_words:
-                    st.warning(f"⚠️ Story complete: {total_words_gen:,} / {target_words:,} words ({percentage}%) | ⏱️ Time: {time_str}")
+                    st.warning(f"⚠️ Story complete: {total_words_gen:,} / {target_words:,} words ({percentage}%) | ⏱️ Total: {time_str} (Text: {text_time:.0f}s, MP3: {mp3_time:.0f}s)")
                 else:
-                    st.success(f"✅ Story complete! {total_words_gen:,} / {target_words:,} words ({percentage}%) | ⏱️ Time: {time_str}")
+                    st.success(f"✅ Story complete! {total_words_gen:,} / {target_words:,} words ({percentage}%) | ⏱️ Total: {time_str} (Text: {text_time:.0f}s, MP3: {mp3_time:.0f}s)")
                 
-                st.info(f"📧 Each chapter has been emailed as TXT")
-                st.info(f"🎵 MP3s are being generated in the background")
+                st.info(f"📧 TEXT emails sent for all chapters")
+                
+                # Show MP3 results
+                mp3_results = stats.get('mp3_results', {})
+                if mp3_results:
+                    success_count = sum(1 for v in mp3_results.values() if v)
+                    st.info(f"🎵 MP3 emails: {success_count}/{len(mp3_results)} sent successfully")
                 
                 st.download_button("💾 Download Complete Story (TXT)", data=story,
                                    file_name=f"{safe_title}_{num_chapters}chapters.txt", use_container_width=True)
@@ -915,12 +988,15 @@ if st.session_state.story_content:
         actual = st.session_state.last_gen_stats.get('word_count', 0)
         chapters = st.session_state.last_gen_stats.get('chapters', 0)
         percentage = int((actual / target) * 100) if target > 0 else 0
-        gen_time = st.session_state.last_gen_stats.get('generation_time', 0)
-        minutes = int(gen_time // 60)
-        seconds = int(gen_time % 60)
+        text_time = st.session_state.last_gen_stats.get('text_generation_time', 0)
+        mp3_time = st.session_state.last_gen_stats.get('mp3_generation_time', 0)
+        total_time = st.session_state.last_gen_stats.get('total_time', 0)
+        
+        minutes = int(total_time // 60)
+        seconds = int(total_time % 60)
         time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
         
-        st.caption(f"📊 {actual:,} / {target:,} words ({percentage}%) across {chapters} chapter(s) | ⏱️ Time: {time_str}")
+        st.caption(f"📊 {actual:,} / {target:,} words ({percentage}%) across {chapters} chapter(s) | ⏱️ Time: {time_str} (Text: {text_time:.0f}s, MP3: {mp3_time:.0f}s)")
         
         if "chapter_stats" in st.session_state.last_gen_stats:
             st.caption("**Per chapter:**")
