@@ -123,7 +123,7 @@ st.markdown("*Multi-chapter story generation with manual MP3 for each chapter*")
 WORDS_PER_CHAPTER = 3000
 
 EDGE_FEMALE_VOICES = {
-    "hi-IN-SwaraNeural": "Hindi - Female",
+    "hi-IN-SwaraNeural": "Hindi - Female - Swara",
     "en-IN-NeerjaNeural": "Indian English - Neerja (Female)",
     "en-US-JennyNeural": "US English - Jenny (Female)",
     "en-GB-SoniaNeural": "UK English - Sonia (Female)",
